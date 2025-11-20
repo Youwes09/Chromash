@@ -26,26 +26,10 @@
             pkg-config
           ];
 
-          buildInputs = with pkgs; [
-            # Add any system dependencies your binary needs
-          ];
-
-          # Runtime dependencies
-          propagatedBuildInputs = with pkgs; [
-            matugen
-            hyprpaper
-          ];
-
-          # Make sure the binary can find its dependencies
-          postInstall = ''
-            wrapProgram $out/bin/chromash \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.matugen pkgs.hyprpaper ]}
-          '';
-
           meta = with pkgs.lib; {
             description = "Dynamic theme manager for Hyprland with Material You theming";
             homepage = "https://github.com/yourusername/chromash";
-            license = licenses.mit; # Change to your license
+            license = licenses.mit;
             maintainers = [ ];
             platforms = platforms.linux;
           };
