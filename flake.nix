@@ -26,20 +26,16 @@
             makeWrapper
           ];
           
-          # Wrap chromash to preserve environment variables
+          # Wrap chromash to preserve HOME and ensure tools are in PATH
           postInstall = ''
             wrapProgram $out/bin/chromash \
               --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.hyprland ]} \
-              --set-default HOME "$HOME" \
-              --set-default USER "$USER" \
-              --set-default XDG_CONFIG_HOME "$HOME/.config" \
-              --set-default XDG_DATA_HOME "$HOME/.local/share" \
-              --set-default XDG_CACHE_HOME "$HOME/.cache"
+              --set-default HOME "$HOME"
           '';
           
           meta = with pkgs.lib; {
             description = "Dynamic theme manager for Hyprland with Material You theming";
-            homepage = "https://github.com/yourusername/chromash";
+            homepage = "https://github.com/Youwes09/Chromash";
             license = licenses.mit;
             maintainers = [ ];
             platforms = platforms.linux;
