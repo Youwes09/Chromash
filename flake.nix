@@ -1,11 +1,11 @@
 {
   description = "Chromash - Dynamic Theme Manager for Hyprland";
-
+  
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
-
+  
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
@@ -15,17 +15,28 @@
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "chromash";
           version = "0.1.0";
-
           src = ./.;
-
+          
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
-
+          
           nativeBuildInputs = with pkgs; [
             pkg-config
+            makeWrapper
           ];
-
+          
+          # Wrap chromash to preserve environment variables
+          postInstall = ''
+            wrapProgram $out/bin/chromash \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.hyprland ]} \
+              --set-default HOME "$HOME" \
+              --set-default USER "$USER" \
+              --set-default XDG_CONFIG_HOME "$HOME/.config" \
+              --set-default XDG_DATA_HOME "$HOME/.local/share" \
+              --set-default XDG_CACHE_HOME "$HOME/.cache"
+          '';
+          
           meta = with pkgs.lib; {
             description = "Dynamic theme manager for Hyprland with Material You theming";
             homepage = "https://github.com/yourusername/chromash";
@@ -34,7 +45,7 @@
             platforms = platforms.linux;
           };
         };
-
+        
         # Development shell
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
@@ -48,14 +59,14 @@
             hyprpaper
             hyprland
           ];
-
+          
           shellHook = ''
             echo "Chromash development environment"
             echo "Run 'cargo build' to build"
             echo "Run 'cargo run -- wallpaper <path>' to test"
           '';
         };
-
+        
         # App for easy running
         apps.default = {
           type = "app";
