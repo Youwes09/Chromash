@@ -325,40 +325,49 @@ impl ChromashApi {
         let hyprpaper_dir = Config::hyprpaper_dir();
         fs::create_dir_all(&hyprpaper_dir)?;
         
-        // Copy wallpaper to hyprpaper directory with original extension
-        let file_name = path.file_name()
-            .ok_or_else(|| ChromashError::General("Invalid file name".into()))?;
+        let file_name = path.file_name().ok_or_else(|| ChromashError::General("Invalid file name".into()))?;
         let dest_path = hyprpaper_dir.join(file_name);
         
-        // Clean up old wallpapers before copying new one
         self.cleanup_old_wallpapers(&hyprpaper_dir, &dest_path)?;
-        
-        // Copy the file
         fs::copy(path, &dest_path)?;
         
-        // Write hyprpaper.conf with the copied path
-        self.write_hyprpaper_config(&dest_path)?;
-        
-        // Apply wallpaper via hyprctl using the copied path
-        let dest_path_str = dest_path.to_string_lossy();
-        
-        // Unload all and wait
-        let _ = self.run_command("hyprctl", &["hyprpaper", "unload", "all"]);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        
-        // Preload new wallpaper
-        self.run_command("hyprctl", &["hyprpaper", "preload", &dest_path_str])?;
-        
-        // Set on all monitors
-        let monitors = self.run_command("hyprctl", &["monitors"])?;
-        for line in monitors.lines() {
+        let monitors_output = self.run_command("hyprctl", &["monitors"])?;
+        let mut active_monitors = Vec::new();
+        for line in monitors_output.lines() {
             if line.starts_with("Monitor") {
-                if let Some(monitor) = line.split_whitespace().nth(1) {
-                    let wallpaper_arg = format!("{},{}", monitor, dest_path_str);
-                    let _ = self.run_command("hyprctl", &["hyprpaper", "wallpaper", &wallpaper_arg]);
+                if let Some(m) = line.split_whitespace().nth(1) {
+                    active_monitors.push(m.to_string());
                 }
             }
         }
+
+        self.write_hyprpaper_config(&dest_path, &active_monitors)?;
+        
+        let dest_path_str = dest_path.to_string_lossy();
+        let _ = self.run_command("hyprctl", &["hyprpaper", "unload", "all"]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        
+        self.run_command("hyprctl", &["hyprpaper", "preload", &dest_path_str])?;
+        for monitor in active_monitors {
+            let arg = format!("{},{}", monitor, dest_path_str);
+            let _ = self.run_command("hyprctl", &["hyprpaper", "wallpaper", &arg]);
+        }
+        Ok(())
+    }
+    
+    fn write_hyprpaper_config(&self, wallpaper_path: &Path, monitors: &[String]) -> Result<()> {
+        let path_str = wallpaper_path.to_string_lossy();
+        let mut content = format!("preload = {}\n", path_str);
+        
+        for m in monitors {
+            content.push_str(&format!("\nwallpaper {{\n    monitor = {}\n    path = {}\n}}\n", m, path_str));
+        }
+        
+        if monitors.is_empty() {
+            content.push_str(&format!("\nwallpaper = ,{}\n", path_str));
+        }
+
+        fs::write(Config::hyprpaper_config(), content)?;
         Ok(())
     }
     
@@ -389,25 +398,6 @@ impl ChromashApi {
                 }
             }
         }
-        Ok(())
-    }
-    
-    fn write_hyprpaper_config(&self, wallpaper_path: &Path) -> Result<()> {
-        let config_path = Config::hyprpaper_config();
-        let wallpaper_str = wallpaper_path.to_string_lossy();
-        
-        let config_content = format!(
-            "# hyprpaper configuration - managed by chromash\n\
-             preload = {}\n\
-             wallpaper = ,{}\n\
-             \n\
-             # If you have specific monitor configurations, add them below:\n\
-             # wallpaper = HDMI-A-1,{}\n\
-             # wallpaper = eDP-1,{}\n",
-            wallpaper_str, wallpaper_str, wallpaper_str, wallpaper_str
-        );
-        
-        fs::write(&config_path, config_content)?;
         Ok(())
     }
     
