@@ -184,11 +184,22 @@ impl ChromashApi {
     }
     
     fn run_command(&self, program: &str, args: &[&str]) -> Result<String> {
-        let output = Command::new(program).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).output()?;
+        let output = Command::new(program)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()?;
+
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
-            Err(ChromashError::Process(String::from_utf8_lossy(&output.stderr).to_string()))
+            // Check BOTH stdout and stderr for the error message
+            let err = String::from_utf8_lossy(&output.stderr).to_string();
+            let out = String::from_utf8_lossy(&output.stdout).to_string();
+            
+            let combined_err = if err.is_empty() { out } else { err };
+            
+            Err(ChromashError::Process(format!("{} failed: {}", program, combined_err.trim())))
         }
     }
     
@@ -325,44 +336,51 @@ impl ChromashApi {
         let hyprpaper_dir = Config::hyprpaper_dir();
         fs::create_dir_all(&hyprpaper_dir)?;
         
-        let file_name = path.file_name().ok_or_else(|| ChromashError::General("Invalid file name".into()))?;
+        let file_name = path.file_name()
+            .ok_or_else(|| ChromashError::General("Invalid file name".into()))?;
         let dest_path = hyprpaper_dir.join(file_name);
         
-        self.cleanup_old_wallpapers(&hyprpaper_dir, &dest_path)?;
-        fs::copy(path, &dest_path)?;
-        
-        let monitors_output = self.run_command("hyprctl", &["monitors"])?;
+        // 1. Detection: Find active monitors first
         let mut active_monitors = Vec::new();
-        for line in monitors_output.lines() {
-            if line.starts_with("Monitor") {
-                if let Some(m) = line.split_whitespace().nth(1) {
-                    active_monitors.push(m.to_string());
+        if let Ok(monitors_output) = self.run_command("hyprctl", &["monitors"]) {
+            for line in monitors_output.lines() {
+                if line.starts_with("Monitor") {
+                    if let Some(m) = line.split_whitespace().nth(1) {
+                        active_monitors.push(m.to_string());
+                    }
                 }
             }
         }
 
+        // 2. File Operations
+        self.cleanup_old_wallpapers(&hyprpaper_dir, &dest_path)?;
+        fs::copy(path, &dest_path)?;
+        
+        // 3. Write Config (Now active_monitors exists!)
         self.write_hyprpaper_config(&dest_path, &active_monitors)?;
         
-        let dest_path_str = dest_path.to_string_lossy();
-        let _ = self.run_command("hyprctl", &["hyprpaper", "unload", "all"]);
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // 4. Restart Hyprpaper
+        let _ = Command::new("pkill").arg("hyprpaper").output();
+        std::thread::sleep(std::time::Duration::from_millis(150));
         
-        self.run_command("hyprctl", &["hyprpaper", "preload", &dest_path_str])?;
-        for monitor in active_monitors {
-            let arg = format!("{},{}", monitor, dest_path_str);
-            let _ = self.run_command("hyprctl", &["hyprpaper", "wallpaper", &arg]);
-        }
+        Command::new("hyprpaper")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| ChromashError::Process(format!("Failed to start hyprpaper: {}", e)))?;
+
         Ok(())
     }
-    
+
     fn write_hyprpaper_config(&self, wallpaper_path: &Path, monitors: &[String]) -> Result<()> {
         let path_str = wallpaper_path.to_string_lossy();
-        let mut content = format!("preload = {}\n", path_str);
+        let mut content = format!("# hyprpaper configuration - managed by chromash\npreload = {}\n", path_str);
         
         for m in monitors {
             content.push_str(&format!("\nwallpaper {{\n    monitor = {}\n    path = {}\n}}\n", m, path_str));
         }
         
+        // Fallback if no monitors are detected
         if monitors.is_empty() {
             content.push_str(&format!("\nwallpaper = ,{}\n", path_str));
         }
