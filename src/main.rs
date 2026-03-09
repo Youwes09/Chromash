@@ -385,6 +385,7 @@ impl ChromashApi {
             content.push_str(&format!("\nwallpaper = ,{}\n", path_str));
         }
 
+        content.push_str("\nsplash = false\n");
         fs::write(Config::hyprpaper_config(), content)?;
         Ok(())
     }
